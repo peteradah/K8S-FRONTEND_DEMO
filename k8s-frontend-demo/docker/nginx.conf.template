@@ -1,0 +1,38 @@
+server {
+    listen 3000;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Hashed, content-addressed build assets — safe to cache forever.
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # Readiness/liveness target for Kubernetes probes. Served as a plain
+    # static file written by docker-entrypoint.sh at container startup
+    # (not proxied), so it stays cheap and always answers even if a
+    # downstream backend is slow or unreachable.
+    location = /healthz {
+        default_type application/json;
+        alias /usr/share/nginx/html/meta/health.json;
+    }
+
+    # Reverse proxy to the backend API. BACKEND_URL is injected from the
+    # container's environment (see docker-entrypoint.sh) so the same image
+    # can point at different backends per environment/namespace without
+    # a rebuild — e.g. BACKEND_URL=http://todo-api.default.svc.cluster.local:8080
+    location /api/ {
+        proxy_pass ${BACKEND_URL}/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # SPA fallback: let React Router (or similar) handle client-side routes.
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

@@ -1,0 +1,23 @@
+# Requires an ingress controller in the cluster, e.g.:
+#   minikube addons enable ingress
+# or (any cluster):
+#   helm install ingress-nginx ingress-nginx/ingress-nginx
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: k8s-frontend-demo
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: k8s-frontend-demo.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: k8s-frontend-demo
+                port:
+                  number: 80

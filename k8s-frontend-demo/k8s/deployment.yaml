@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k8s-frontend-demo
+  labels:
+    app: k8s-frontend-demo
+spec:
+  # Bump this (or `kubectl scale`) to practice horizontal scaling.
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: k8s-frontend-demo
+  template:
+    metadata:
+      labels:
+        app: k8s-frontend-demo
+    spec:
+      containers:
+        - name: frontend
+          # Replace with your registry, e.g. myacr.azurecr.io/k8s-frontend-demo:<tag>
+          image: k8s-frontend-demo:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            # Where nginx proxies /api/* to. Point this at a real backend
+            # Service DNS name once you have one, e.g.:
+            # http://todo-api.default.svc.cluster.local:8080
+            - name: BACKEND_URL
+              value: "http://localhost:9999"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 3000
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false # nginx writes its config/health.json at startup
