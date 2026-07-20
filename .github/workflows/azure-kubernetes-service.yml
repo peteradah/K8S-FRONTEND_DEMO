@@ -3,7 +3,89 @@
 # This workflow assumes you have already created the target AKS cluster and have created an Azure Container Registry (ACR)
 # The ACR should be attached to the AKS cluster
 # For instructions see:
-#   - https://docs.microsoft.com/en-us/azure/aks/kubernetes-walkthrough-portal
+#   - https://docs.microsoft.com/en-us/azure/aks/kubernetes-walkthrough-porta# Adapted from GitHub's AKS starter workflow for a private cluster:
+# - buildImage stays on ubuntu-latest (az acr build only needs to reach the
+#   public Azure Resource Manager API, not the cluster itself)
+# - deploy runs on the self-hosted runner inside the cluster's VNet, since
+#   that's the only thing with network access to the private API server
+
+name: Build and deploy an app to AKS
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+env:
+  AZURE_CONTAINER_REGISTRY: ${{ vars.ACR_NAME }}
+  CONTAINER_NAME: "k8s-frontend-demo"
+  RESOURCE_GROUP: ${{ vars.AKS_RESOURCE_GROUP }}
+  CLUSTER_NAME: ${{ vars.AKS_CLUSTER_NAME }}
+  DEPLOYMENT_MANIFEST_PATH: "k8s/deployment.yaml,k8s/service.yaml,k8s/ingress.yaml"
+
+jobs:
+  buildImage:
+    permissions:
+      contents: read
+      id-token: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # Builds server-side in ACR — no local Docker needed, and no network
+      # path to the private cluster required for this step.
+      - name: Build and push image to ACR
+        run: |
+          az acr build --image ${{ env.AZURE_CONTAINER_REGISTRY }}.azurecr.io/${{ env.CONTAINER_NAME }}:${{ github.sha }} --registry ${{ env.AZURE_CONTAINER_REGISTRY }} -g ${{ env.RESOURCE_GROUP }} .
+
+  deploy:
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    # Must run inside the VNet — ubuntu-latest cannot reach a private
+    # AKS API server. Match the labels your self-hosted runner registered
+    # with (check repo Settings -> Actions -> Runners).
+    runs-on: [self-hosted, linux, snet-runners]
+    needs: [buildImage]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Set up kubelogin for non-interactive login
+        uses: azure/use-kubelogin@v1
+        with:
+          kubelogin-version: 'v0.0.25'
+
+      - name: Get K8s context
+        uses: azure/aks-set-context@v3
+        with:
+          resource-group: ${{ env.RESOURCE_GROUP }}
+          cluster-name: ${{ env.CLUSTER_NAME }}
+          admin: 'false'
+          use-kubelogin: 'true'
+
+      - name: Deploys application
+        uses: Azure/k8s-deploy@v4
+        with:
+          action: deploy
+          manifests: ${{ env.DEPLOYMENT_MANIFEST_PATH }}
+          images: |
+            ${{ env.AZURE_CONTAINER_REGISTRY }}.azurecr.io/${{ env.CONTAINER_NAME }}:${{ github.sha }}
+l
 #   - https://docs.microsoft.com/en-us/azure/container-registry/container-registry-get-started-portal
 #   - https://learn.microsoft.com/en-us/azure/aks/cluster-container-registry-integration?tabs=azure-cli#configure-acr-integration-for-existing-aks-clusters
 #   - https://github.com/Azure/aks-create-action
